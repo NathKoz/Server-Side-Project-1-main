@@ -16,7 +16,7 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
+    username = Column(String, index=True)
     is_admin = Column(Boolean, default=False)
     image_url = Column(String)
 
@@ -37,13 +37,13 @@ class UserCreate(BaseModel):
     image_url: str = ""
 
 class UserUpdate(BaseModel):
-    name: Optional[str] = None
+    username: Optional[str] = None
     is_admin: Optional[bool] = None
     image_url: Optional[str] = None
 
 class UserResponse(BaseModel):
     id: int
-    name: str
+    username: str
     is_admin: bool
     image_url: str
 
@@ -81,7 +81,7 @@ def read_root():
 @app.post("/users/", response_model=UserResponse)
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
     try:
-        db_user = User(**user.dict())
+        db_user = User(username=user.name, is_admin=user.is_admin, image_url=user.image_url)
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
@@ -93,7 +93,7 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
 def get_users(name: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(User)
     if name:
-        query = query.filter(User.name.contains(name))
+        query = query.filter(User.username.contains(name))
     return query.all()
 
 @app.get("/users/{user_id}", response_model=UserResponse)
@@ -166,6 +166,34 @@ def delete_post(post_id: int, db: Session = Depends(get_db)):
     db.commit()
     return db_post
 
+@app.get("/posts/user/{user_id}", response_model=List[PostResponse])
+def get_posts_by_user(user_id: int, db: Session = Depends(get_db)):
+    user_posts = db.query(Post).filter(Post.user_id == user_id).all()
+    if not user_posts:
+        raise HTTPException(status_code=404, detail="No posts found for this user")
+    return user_posts
+
+@app.patch("/posts/{post_id}/increment_likes", response_model=PostResponse)
+def increment_likes(post_id: int, db: Session = Depends(get_db)):
+    db_post = db.query(Post).filter(Post.id == post_id).first()
+    if db_post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+    db_post.likes += 1
+    db.commit()
+    db.refresh(db_post)
+    return db_post
+
+@app.patch("/posts/{post_id}/decrement_likes", response_model=PostResponse)
+def decrement_likes(post_id: int, db: Session = Depends(get_db)):
+    db_post = db.query(Post).filter(Post.id == post_id).first()
+    if db_post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if db_post.likes > 0:
+        db_post.likes -= 1
+    db.commit()
+    db.refresh(db_post)
+    return db_post
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return Response(status_code=204)
@@ -176,4 +204,3 @@ async def validation_exception_handler(request, exc):
         status_code=422,
         content={"detail": str(exc)}
     )
-
